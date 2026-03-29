@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Point in Polygon (Nearest Neighbor Ordering)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid black;
+            display: block;
+            margin: 20px auto;
+            background: white;
+            cursor: move;
+        }
+        #controls {
+            text-align: center;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="polygonCanvas" width="800" height="600"></canvas>
+    <div id="controls">
+        <p>Use mouse wheel to zoom, drag to pan.</p>
+        <p id="status">Loading data...</p>
+    </div>
+    <script>
+        // Point in Polygon function
+        function pointInPolygon(polygon, point) {
+            let x = point[0], y = point[1];
+            let n = polygon.length;
+            let inside = false;
+
+            for (let i = 0; i < n; i++) {
+                let x1 = polygon[i][0], y1 = polygon[i][1];
+                let x2 = polygon[(i + 1) % n][0], y2 = polygon[(i + 1) % n][1];
+
+                // Check if point is on the edge
+                if (((x1 === x2) && (x === x1) && (Math.min(y1, y2) <= y) && (y <= Math.max(y1, y2))) ||
+                    ((y1 === y2) && (y === y1) && (Math.min(x1, x2) <= x) && (x <= Math.max(x1, x2)))) {
+                    return true;
+                }
+
+                // Check if the ray intersects the edge
+                if (y > Math.min(y1, y2)) {
+                    if (y <= Math.max(y1, y2)) {
+                        if (x <= Math.max(x1, x2)) {
+                            if (y1 !== y2) {
+                                let xIntersect = (y - y1) * (x2 - x1) / (y2 - y1) + x1;
+                                if (x1 === x2 || x <= xIntersect) {
+                                    inside = !inside;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return inside;
+        }
+
+        // Function to order points by nearest neighbor
+        function orderPointsByNearestNeighbor(points) {
+            if (points.length === 0) return [];
+
+            // Start with the first point
+            let ordered = [points[0]];
+            let unvisited = [...points.slice(1)];
+
+            while (unvisited.length > 0) {
+                const lastPoint = ordered[ordered.length - 1];
+                let nearestIndex = 0;
+                let minDistance = Infinity;
+
+                // Find the nearest unvisited point
+                unvisited.forEach((point, index) => {
+                    const dx = point[0] - lastPoint[0];
+                    const dy = point[1] - lastPoint[1];
+                    const distance = dx * dx + dy * dy; // Squared distance (no sqrt for performance)
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        nearestIndex = index;
+                    }
+                });
+
+                // Add the nearest point to the ordered list
+                ordered.push(unvisited[nearestIndex]);
+                unvisited.splice(nearestIndex, 1);
+            }
+
+            // Close the polygon by returning to the first point
+            return ordered;
+        }
+
+        // Canvas setup
+        const canvas = document.getElementById("polygonCanvas");
+        const ctx = canvas.getContext("2d");
+        const statusElement = document.getElementById("status");
+
+        // Transform variables
+        let scaleFactor = 50;
+        let offsetX = canvas.width / 2;
+        let offsetY = canvas.height / 2;
+        let isDragging = false;
+        let lastX, lastY;
+
+        // Scale and translate coordinates
+        function transform(x, y) {
+            return {
+                x: (x - 43) * scaleFactor + offsetX,
+                y: (y - 41) * scaleFactor + offsetY
+            };
+        }
+
+        // Draw function
+        function draw(polygon, testPoints) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw polygon
+            ctx.beginPath();
+            const firstPoint = transform(polygon[0][0], polygon[0][1]);
+            ctx.moveTo(firstPoint.x, firstPoint.y);
+            for (let i = 1; i < polygon.length; i++) {
+                const point = transform(polygon[i][0], polygon[i][1]);
+                ctx.lineTo(point.x, point.y);
+            }
+            // Close the polygon
+            ctx.lineTo(firstPoint.x, firstPoint.y);
+            ctx.closePath();
+            ctx.strokeStyle = "blue";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw test points
+            testPoints.forEach(([x, y, expected]) => {
+                const result = pointInPolygon(polygon, [x, y]);
+                const point = transform(x, y);
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = result === expected ? "green" : "red";
+                ctx.fill();
+            });
+        }
+
+        // Mouse events for zoom and pan
+        canvas.addEventListener("wheel", (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Zoom in/out
+            offsetX = mouseX + (offsetX - mouseX) * delta;
+            offsetY = mouseY + (offsetY - mouseY) * delta;
+            scaleFactor *= delta;
+
+            draw(polygon, testPoints);
+        });
+
+        canvas.addEventListener("mousedown", (e) => {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            offsetX += dx;
+            offsetY += dy;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            draw(polygon, testPoints);
+        });
+
+        canvas.addEventListener("mouseup", () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+            isDragging = false;
+        });
+
+        // Run tests and log results
+        function runTests(polygon, testPoints) {
+            testPoints.forEach(([x, y, expected]) => {
+                const result = pointInPolygon(polygon, [x, y]);
+                console.log(`Point (${x}, ${y}): Expected ${expected}, Got ${result} ${result === expected ? '✅' : '❌'}`);
+            });
+        }
+
+        // Load data from JSON file
+        async function loadData() {
+            try {
+                const response = await fetch('data.json'); // Path to your JSON file
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                // Order polygon points by nearest neighbor
+                polygon = orderPointsByNearestNeighbor(data.polygon);
+                testPoints = data.testPoints;
+
+                statusElement.textContent = "Data loaded and polygon ordered!";
+                draw(polygon, testPoints);
+                runTests(polygon, testPoints);
+            } catch (error) {
+                statusElement.textContent = `Error loading data: ${error.message}`;
+                console.error("Error loading data:", error);
+            }
+        }
+
+        // Initialize
+        let polygon = [];
+        let testPoints = [];
+        loadData();
+    </script>
+</body>
+</html>
