@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Point in Polygon (Nearest Neighbor Ordering)</title>
+    <title>Convex Hull Polygon (Auto-Scaled)</title>
     <style>
         body {
             margin: 0;
@@ -15,19 +15,29 @@
             display: block;
             margin: 20px auto;
             background: white;
-            cursor: move;
+            cursor: crosshair;
         }
         #controls {
             text-align: center;
             margin-top: 10px;
         }
+        #cursorCoords {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 5px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
+    <div id="cursorCoords">Mouse: (0, 0)</div>
     <canvas id="polygonCanvas" width="800" height="600"></canvas>
     <div id="controls">
-        <p>Use mouse wheel to zoom, drag to pan.</p>
-        <p id="status">Loading data...</p>
+        <p>Click to add a point.</p>
     </div>
     <script>
         // Point in Polygon function
@@ -63,48 +73,129 @@
             return inside;
         }
 
-        // Function to order points by nearest neighbor
-        function orderPointsByNearestNeighbor(points) {
-            if (points.length === 0) return [];
+        // Function to compute convex hull using Andrew's monotone chain algorithm
+        function computeConvexHull(points) {
+            if (points.length <= 1) return points;
 
-            // Start with the first point
-            let ordered = [points[0]];
-            let unvisited = [...points.slice(1)];
+            // Sort points lexographically (first by x, then by y)
+            points.sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
 
-            while (unvisited.length > 0) {
-                const lastPoint = ordered[ordered.length - 1];
-                let nearestIndex = 0;
-                let minDistance = Infinity;
-
-                // Find the nearest unvisited point
-                unvisited.forEach((point, index) => {
-                    const dx = point[0] - lastPoint[0];
-                    const dy = point[1] - lastPoint[1];
-                    const distance = dx * dx + dy * dy; // Squared distance (no sqrt for performance)
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        nearestIndex = index;
-                    }
-                });
-
-                // Add the nearest point to the ordered list
-                ordered.push(unvisited[nearestIndex]);
-                unvisited.splice(nearestIndex, 1);
+            // Build lower hull
+            const lower = [];
+            for (let i = 0; i < points.length; i++) {
+                while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], points[i]) <= 0) {
+                    lower.pop();
+                }
+                lower.push(points[i]);
             }
 
-            // Close the polygon by returning to the first point
-            return ordered;
+            // Build upper hull
+            const upper = [];
+            for (let i = points.length - 1; i >= 0; i--) {
+                while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], points[i]) <= 0) {
+                    upper.pop();
+                }
+                upper.push(points[i]);
+            }
+
+            // Concatenate and remove duplicates
+            return lower.concat(upper.slice(1, -1));
         }
+
+        // Cross product of vectors OA and OB
+        function cross(o, a, b) {
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        }
+
+        // Original points
+        const originalPoints = [
+            [44.202294, 43.131097],
+            [44.004553, 43.127867],
+            [43.993894, 42.813722],
+            [43.957638, 43.035994],
+            [44.079116, 42.828541],
+            [44.100402, 42.816686],
+            [44.121680, 42.896704],
+            [44.149331, 43.415338],
+            [44.017342, 42.772232],
+            [43.966170, 42.801868],
+            [44.234329, 42.935231],
+            [44.123494, 43.059505],
+            [44.093506, 42.885052]
+        ];
+
+        // Compute convex hull
+        const polygon = computeConvexHull(originalPoints);
+
+        // Test points
+        let testPoints = [
+            [44.202294, 43.131097, true],
+            [44.004553, 43.127867, true],
+            [43.966170, 42.801868, true],
+            [44.017342, 42.772232, true],
+            [44.149331, 43.415338, true],
+            [44.121680, 42.896704, true],
+            [44.100402, 42.816686, true],
+            [44.079116, 42.828541, true],
+            [43.957638, 43.035994, true],
+            [43.993894, 42.813722, true],
+            [44.234329, 42.935231, true],
+            [44.611083, 42.727777, false],
+            [43.444866, 43.579274, false],
+            [45.317825, 42.821738, false],
+            [45.002008, 41.975732, false],
+            [44.365123, 41.865143, false],
+            [44.123494, 43.059505, true],
+            [44.093506, 42.885052, true],
+            [43.444277, 44.644870, false],
+            [43.702537, 42.066020, false]
+        ];
 
         // Canvas setup
         const canvas = document.getElementById("polygonCanvas");
         const ctx = canvas.getContext("2d");
-        const statusElement = document.getElementById("status");
+        const cursorCoordsElement = document.getElementById("cursorCoords");
+
+        // Calculate bounds and scale
+        function calculateScaleAndOffset(points, canvasWidth, canvasHeight) {
+            if (points.length === 0) {
+                return { scale: 1, offsetX: canvasWidth / 2, offsetY: canvasHeight / 2 };
+            }
+
+            // Find min and max coordinates
+            let minX = points[0][0], maxX = points[0][0];
+            let minY = points[0][1], maxY = points[0][1];
+
+            points.forEach(([x, y]) => {
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+            });
+
+            // Calculate center and range
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            const rangeX = maxX - minX;
+            const rangeY = maxY - minY;
+
+            // Calculate scale to fit the canvas
+            const scaleX = canvasWidth / rangeX;
+            const scaleY = canvasHeight / rangeY;
+            const scale = Math.min(scaleX, scaleY) * 0.9; // Add 10% margin
+
+            // Calculate offset to center the points
+            const offsetX = canvasWidth / 2 - (centerX - minX) * scale;
+            const offsetY = canvasHeight / 2 - (centerY - minY) * scale;
+
+            return { scale, offsetX, offsetY, centerX, centerY };
+        }
+
+        // Calculate scale and offset for all points
+        const allPoints = [...originalPoints, ...testPoints.map(p => [p[0], p[1]])];
+        const { scale: scaleFactor, offsetX, offsetY } = calculateScaleAndOffset(allPoints, canvas.width, canvas.height);
 
         // Transform variables
-        let scaleFactor = 50;
-        let offsetX = canvas.width / 2;
-        let offsetY = canvas.height / 2;
         let isDragging = false;
         let lastX, lastY;
 
@@ -116,35 +207,130 @@
             };
         }
 
+        // Inverse transform (screen to world coordinates)
+        function inverseTransform(screenX, screenY) {
+            return {
+                x: (screenX - offsetX) / scaleFactor + 43,
+                y: (screenY - offsetY) / scaleFactor + 41
+            };
+        }
+
         // Draw function
-        function draw(polygon, testPoints) {
+        function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw polygon
+            // Draw polygon (convex hull)
             ctx.beginPath();
-            const firstPoint = transform(polygon[0][0], polygon[0][1]);
-            ctx.moveTo(firstPoint.x, firstPoint.y);
-            for (let i = 1; i < polygon.length; i++) {
-                const point = transform(polygon[i][0], polygon[i][1]);
-                ctx.lineTo(point.x, point.y);
+            if (polygon.length > 0) {
+                const firstPoint = transform(polygon[0][0], polygon[0][1]);
+                ctx.moveTo(firstPoint.x, firstPoint.y);
+                for (let i = 1; i < polygon.length; i++) {
+                    const point = transform(polygon[i][0], polygon[i][1]);
+                    ctx.lineTo(point.x, point.y);
+                }
+                // Close the polygon
+                ctx.lineTo(firstPoint.x, firstPoint.y);
             }
-            // Close the polygon
-            ctx.lineTo(firstPoint.x, firstPoint.y);
             ctx.closePath();
             ctx.strokeStyle = "blue";
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Draw test points
-            testPoints.forEach(([x, y, expected]) => {
-                const result = pointInPolygon(polygon, [x, y]);
+            // Draw polygon vertices (green)
+            polygon.forEach(([x, y]) => {
+                const point = transform(x, y);
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = "green";
+                ctx.fill();
+            });
+
+            // Draw all original points (green if inside, blue if outside)
+            originalPoints.forEach(([x, y]) => {
+                const isInside = pointInPolygon(polygon, [x, y]);
                 const point = transform(x, y);
                 ctx.beginPath();
                 ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
-                ctx.fillStyle = result === expected ? "green" : "red";
+                ctx.fillStyle = isInside ? "green" : "blue";
+                ctx.fill();
+            });
+
+            // Draw test points with tooltips
+            testPoints.forEach((pointData, index) => {
+                let x, y, expected;
+                if (pointData.length === 3) {
+                    [x, y, expected] = pointData;
+                } else {
+                    [x, y] = pointData;
+                }
+
+                const isInside = pointInPolygon(polygon, [x, y]);
+                const point = transform(x, y);
+
+                // Color logic:
+                // Green: inside or vertex
+                // Blue: outside
+                // Red: mismatch (expected != result)
+                let fillStyle;
+                if (polygon.some(([px, py]) => px === x && py === y)) {
+                    fillStyle = "green"; // Vertex
+                } else if (isInside) {
+                    fillStyle = expected === undefined ? "green" : (expected ? "green" : "red"); // Inside
+                } else {
+                    fillStyle = expected === undefined ? "blue" : (!expected ? "blue" : "red"); // Outside
+                }
+
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = fillStyle;
                 ctx.fill();
             });
         }
+
+        // Show tooltip on mouse move
+        canvas.addEventListener("mousemove", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Update cursor coordinates
+            const worldCoords = inverseTransform(mouseX, mouseY);
+            cursorCoordsElement.textContent = `Mouse: (${worldCoords.x.toFixed(4)}, ${worldCoords.y.toFixed(4)})`;
+
+            // Check if mouse is over a point
+            const pointRadius = 5;
+
+            // Check original points
+            originalPoints.forEach(([x, y]) => {
+                const point = transform(x, y);
+                const distance = Math.sqrt((mouseX - point.x) ** 2 + (mouseY - point.y) ** 2);
+                if (distance <= pointRadius) {
+                    canvas.title = `Point: (${x.toFixed(4)}, ${y.toFixed(4)})`;
+                }
+            });
+
+            // Check polygon vertices
+            polygon.forEach(([x, y]) => {
+                const point = transform(x, y);
+                const distance = Math.sqrt((mouseX - point.x) ** 2 + (mouseY - point.y) ** 2);
+                if (distance <= pointRadius) {
+                    canvas.title = `Vertex: (${x.toFixed(4)}, ${y.toFixed(4)})`;
+                }
+            });
+
+            // Check test points
+            testPoints.forEach((pointData) => {
+                let x, y;
+                if (pointData.length >= 2) {
+                    [x, y] = pointData;
+                }
+                const point = transform(x, y);
+                const distance = Math.sqrt((mouseX - point.x) ** 2 + (mouseY - point.y) ** 2);
+                if (distance <= pointRadius) {
+                    canvas.title = `Test Point: (${x.toFixed(4)}, ${y.toFixed(4)})`;
+                }
+            });
+        });
 
         // Mouse events for zoom and pan
         canvas.addEventListener("wheel", (e) => {
@@ -159,7 +345,19 @@
             offsetY = mouseY + (offsetY - mouseY) * delta;
             scaleFactor *= delta;
 
-            draw(polygon, testPoints);
+            draw();
+        });
+
+        // Add point on click
+        canvas.addEventListener("click", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Add a new point on click
+            const worldPoint = inverseTransform(mouseX, mouseY);
+            testPoints.push([worldPoint.x, worldPoint.y]);
+            draw();
         });
 
         canvas.addEventListener("mousedown", (e) => {
@@ -176,7 +374,7 @@
             offsetY += dy;
             lastX = e.clientX;
             lastY = e.clientY;
-            draw(polygon, testPoints);
+            draw();
         });
 
         canvas.addEventListener("mouseup", () => {
@@ -185,42 +383,28 @@
 
         canvas.addEventListener("mouseleave", () => {
             isDragging = false;
+            canvas.title = "";
         });
 
         // Run tests and log results
-        function runTests(polygon, testPoints) {
-            testPoints.forEach(([x, y, expected]) => {
+        function runTests() {
+            testPoints.forEach((pointData) => {
+                let x, y, expected;
+                if (pointData.length === 3) {
+                    [x, y, expected] = pointData;
+                } else {
+                    [x, y] = pointData;
+                    console.log(`Point (${x}, ${y}): Added by user, Inside: ${pointInPolygon(polygon, [x, y])}`);
+                    return;
+                }
                 const result = pointInPolygon(polygon, [x, y]);
                 console.log(`Point (${x}, ${y}): Expected ${expected}, Got ${result} ${result === expected ? '✅' : '❌'}`);
             });
         }
 
-        // Load data from JSON file
-        async function loadData() {
-            try {
-                const response = await fetch('data.json'); // Path to your JSON file
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-
-                // Order polygon points by nearest neighbor
-                polygon = orderPointsByNearestNeighbor(data.polygon);
-                testPoints = data.testPoints;
-
-                statusElement.textContent = "Data loaded and polygon ordered!";
-                draw(polygon, testPoints);
-                runTests(polygon, testPoints);
-            } catch (error) {
-                statusElement.textContent = `Error loading data: ${error.message}`;
-                console.error("Error loading data:", error);
-            }
-        }
-
-        // Initialize
-        let polygon = [];
-        let testPoints = [];
-        loadData();
+        // Initial draw and tests
+        draw();
+        runTests();
     </script>
 </body>
 </html>
